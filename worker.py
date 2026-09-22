@@ -1,5 +1,4 @@
 import os
-import json
 import asyncio
 import re
 import requests
@@ -8,54 +7,26 @@ import time
 import uuid
 import zipfile
 import random
-import urllib.parse
-import io
-from datetime import datetime
 from collections import defaultdict
 import aiohttp
-
 from pyrogram import Client, enums
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from PIL import Image, ImageDraw, ImageFont
 
-# ================== كود الكشف والربط ==================
-print("🔍 DEBUG: جاري فحص متغيرات البيئة...")
-s_str = os.environ.get("MY_SESSION_STRING", "").strip()
-
-if not s_str:
-    print("❌ CRITICAL ERROR: MY_SESSION_STRING is missing. Add it under Settings → Secrets and variables → Actions.")
-    exit(1)
-
-if not os.environ.get("MY_TELEGRAM_TOKEN", "").strip():
-    print("❌ CRITICAL ERROR: MY_TELEGRAM_TOKEN is missing.")
-    exit(1)
-
-if not os.environ.get("MY_GITHUB_TOKEN", "").strip():
-    print("❌ CRITICAL ERROR: MY_GITHUB_TOKEN is missing.")
-    exit(1)
-
-if not os.environ.get("CF_API_KEY", "").strip():
-    print("❌ CRITICAL ERROR: CF_API_KEY is missing.")
-    exit(1)
-
-# ================== بياناتك السرية ==================
-TOKEN = os.environ.get("MY_TELEGRAM_TOKEN")
-GITHUB_TOKEN = os.environ.get("MY_GITHUB_TOKEN")
+# ================== GitHub-only configuration ==================
+SESSION_STRING = os.environ.get("MY_SESSION_STRING", "").strip()
+GITHUB_TOKEN = os.environ.get("MY_GITHUB_TOKEN", "").strip()
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "").strip()
-if "/" in GITHUB_REPOSITORY:
-    GITHUB_USER, REPO_NAME = GITHUB_REPOSITORY.split("/", 1)
-else:
-    GITHUB_USER = os.environ.get("GITHUB_USER", "").strip()
-    REPO_NAME = os.environ.get("GITHUB_REPO", "").strip()
-SESSION_STRING = s_str
 
-# خدعة النينجا: وضع التوكن مقسوم لتفادي حظر جيت هاب
-CF_API_KEY = os.environ.get("CF_API_KEY", "").strip()
+if not SESSION_STRING:
+    raise SystemExit("MY_SESSION_STRING is missing.")
+if not GITHUB_TOKEN:
+    raise SystemExit("MY_GITHUB_TOKEN is missing.")
+if "/" not in GITHUB_REPOSITORY:
+    raise SystemExit("GITHUB_REPOSITORY is missing or invalid.")
+
+GITHUB_USER, REPO_NAME = GITHUB_REPOSITORY.split("/", 1)
 
 MAX_FILE_SIZE_MB = 150
 MIN_CHANNELS_REQUIRED = 300 
-CHANNEL_ID = "@free_iptv_world"
-CHANNEL_NAME_FOR_FILE = "FREE_IPTV_WORLD"
 
 # ================== إعدادات السرعة القصوى (TURBO MODE) ==================
 MAX_PARALLEL_DIALOGS = 5          
@@ -69,13 +40,11 @@ DIALOG_SEM = None
 FETCH_SEM = None
 UPLOAD_SEM = None
 
-MY_CHANNELS = ["عالم iptv مجاني", "دردشة مجانية عبر الإنترنت", "تحديث مجاني لعالم البث عبر الإنترنت"]
 TARGET_KEYWORDS = ["iptv", "m3u", "xtream", "mac", "portal", "sat", "tv", "server", "stb", "cccam", "streaming", "restream", "codes", "vip", "app"]
 
 ADULT_WORDS = ["xxx", "porn", "adult", "adults", "sex", "18+", "+18", "erotic", "playboy", "amateur", "onlyfans", "brazzers", "vivid", "hustler", "penthouse", "babes", "realitykings", "naughty", "bangbros", "milf", "lesbian", "gay", "cam", "nsfw", "x-art", "babe", "pussy", "dick", "matures", "hardcore", "xnxx", "xvideos", "pornhub", "redtube", "kamasutra", "peep"]
 ADULT_REGEX = re.compile(r'(?i)(?:' + '|'.join(map(re.escape, ADULT_WORDS)) + r')')
 GROUP_TITLE_REGEX = re.compile(r'group-title="([^"]*)"')
-
 
 # ============== نظام البحث الذكي الصارم (Strict Smart Sniper) ==============
 SMART_ALIASES_REGEX = {
@@ -154,22 +123,6 @@ IMAGE_SIMPLE_CAPTION = """🌍 <b>𝗙𝗥𝗘𝗘 𝗜𝗣𝗧𝗩 𝗪𝗢𝗥
 ━━━━━━━━━━━━━━━━━━
 👇 <i>الروابط في المنشور التالي</i> 👇"""
 
-def build_post_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📣 𝗢𝘂𝗿 𝗖𝗵𝗮𝗻𝗻𝗲𝗹", url="https://t.me/free_iptv_world"), InlineKeyboardButton("💬 𝗢𝘂𝗿 𝗚𝗿𝗼𝘂𝗽", url="https://t.me/FREE_IPTV_WORLD_CHAT")],
-        [InlineKeyboardButton("How to use our links 🥰", url="https://t.me/free_iptv_world/2763")],
-        [InlineKeyboardButton("🔁 𝗦𝗵𝗮𝗿𝗲 𝗣𝗼𝘀𝘁", url="https://t.me/share/url?url=https://t.me/free_iptv_world&text=🔥%20أقوى%20سيرفرات%20IPTV%20مجاناً%20🔥")],
-        [InlineKeyboardButton("💎 𝗩𝗜𝗣 𝗙𝗿𝗲𝗲 𝗘𝗮𝗿𝗻𝗶𝗻𝗴 💸", url="https://t.me/ainovum_bot?start=ref_1144699168&startapp=ref_1144699168")],
-        [InlineKeyboardButton("🎁 𝗠𝗮𝘀𝘀𝗶𝘃𝗲 𝗙𝗿𝗲𝗲 𝗥𝗲𝘄𝗮𝗿𝗱𝘀 💰", url="https://t.me/VortexDigBot?startapp=ref_1144699168")],
-        [InlineKeyboardButton("🚀 𝗕𝗼𝗼𝘀𝘁 𝗢𝘂𝗿 𝗖𝗵𝗮𝗻𝗻𝗲𝗹 🌟", url="https://t.me/boost/free_iptv_world")]
-    ])
-
-def stop_button():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛑 إيقاف العملية", callback_data="cancel_process")]
-    ])
-
-
 def safe_delete(filepath):
     try:
         if os.path.exists(filepath): os.remove(filepath)
@@ -182,113 +135,8 @@ async def is_link_working(url):
                 return response.status == 200
     except: return False
 
-# ================== توليد بوستر احترافي مع الإحصائيات الدقيقة ==================
 CF_API_URL = "https://iptv-ai-bot.mesbahikarim03.workers.dev"
 
-async def generate_ai_poster(title_text, server_count, keyword="", live=0, vod=0, series=0):
-    try:
-        prompt = "Ultra-premium dark moody cinematic background with subtle golden dust and lighting, dark royal atmosphere, highly detailed, 8k, empty space in center, strictly no text, no logos"
-        headers = {"Authorization": f"Bearer {CF_API_KEY}", "Content-Type": "application/json"}
-        payload = {"prompt": prompt}
-        out_path = f"poster_{uuid.uuid4().hex[:8]}.jpg"
-
-        for attempt in range(1, 4):
-            try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=45)) as session:
-                    async with session.post(CF_API_URL, headers=headers, json=payload) as resp:
-                        if resp.status == 200:
-                            data = await resp.read()
-                            if len(data) > 5000:
-                                try:
-                                    base_img = Image.open(io.BytesIO(data)).convert("RGBA")
-                                    width, height = base_img.size
-                                    text_layer = Image.new("RGBA", base_img.size, (0,0,0,0))
-                                    draw = ImageDraw.Draw(text_layer)
-                                    
-                                    try:
-                                        font_huge = ImageFont.truetype("font.ttf", 100)
-                                        font_large = ImageFont.truetype("font.ttf", 50)
-                                        font_medium = ImageFont.truetype("font.ttf", 40)
-                                        font_small = ImageFont.truetype("font.ttf", 32)
-                                    except:
-                                        font_huge = font_large = font_medium = font_small = ImageFont.load_default()
-                                        
-                                    center_x = width // 2
-                                    y_channel = height // 2 - 140
-                                    y_package = height // 2 - 40
-                                    y_cats = height // 2 + 80
-                                    y_stats = height // 2 + 150
-                                    y_quality = height // 2 + 210
-
-                                    text_channel = "FREE IPTV WORLD"
-                                    draw.text((center_x + 2, y_channel + 2), text_channel, font=font_large, fill=(0, 0, 0, 200), anchor="mm")
-                                    draw.text((center_x, y_channel), text_channel, font=font_large, fill=(220, 220, 220, 255), anchor="mm")
-
-                                    text_package = f"{keyword.upper()} EDITION" if keyword else "VIP SPORTS & MOVIES"
-                                    glow_color = (255, 215, 0, 40)
-                                    for offset in range(1, 15, 2):
-                                        off = offset // 2
-                                        draw.text((center_x + off, y_package + off), text_package, font=font_huge, fill=glow_color, anchor="mm")
-                                        draw.text((center_x - off, y_package - off), text_package, font=font_huge, fill=glow_color, anchor="mm")
-                                    draw.text((center_x + 8, y_package + 8), text_package, font=font_huge, fill=(0, 0, 0, 200), anchor="mm")
-                                    draw.text((center_x, y_package), text_package, font=font_huge, fill=(212, 175, 55, 255), anchor="mm")
-                                    draw.text((center_x, y_package - 2), text_package, font=font_huge, fill=(255, 255, 255, 180), anchor="mm")
-
-                                    text_cats = "Live Channels  •  Movies  •  TV Series"
-                                    draw.text((center_x + 2, y_cats + 2), text_cats, font=font_medium, fill=(0, 0, 0, 200), anchor="mm")
-                                    draw.text((center_x, y_cats), text_cats, font=font_medium, fill=(255, 255, 255, 255), anchor="mm")
-
-                                    if live > 0 or vod > 0 or series > 0:
-                                        text_stats = f"Live: {live:,}  |  Movies: {vod:,}  |  Series: {series:,}"
-                                    else:
-                                        text_stats = "PREMIUM HIGH-SPEED SERVERS"
-                                    draw.text((center_x + 2, y_stats + 2), text_stats, font=font_small, fill=(0, 0, 0, 200), anchor="mm")
-                                    draw.text((center_x, y_stats), text_stats, font=font_small, fill=(255, 215, 0, 255), anchor="mm")
-
-                                    text_quality = "QUALITY:  SD  •  HD  •  FHD  •  4K  •  8K"
-                                    draw.text((center_x + 2, y_quality + 2), text_quality, font=font_small, fill=(0, 0, 0, 200), anchor="mm")
-                                    draw.text((center_x, y_quality), text_quality, font=font_small, fill=(180, 180, 180, 255), anchor="mm")
-                                    
-                                    final_img = Image.alpha_composite(base_img, text_layer)
-                                    final_img.convert("RGB").save(out_path, "JPEG")
-                                    return out_path
-                                except:
-                                    with open(out_path, "wb") as f: f.write(data)
-                                    return out_path
-            except: pass
-            await asyncio.sleep(2)
-        return None
-    except: return None
-
-async def send_post_with_ai_image(bot, channel_id, title_text, server_count, keyword, full_caption_with_links, live=0, vod=0, series=0):
-    poster_path = await generate_ai_poster(title_text, server_count, keyword, live, vod, series)
-    img_caption = IMAGE_SIMPLE_CAPTION.format(
-        title=title_text, count=server_count, date=datetime.now().strftime("%Y-%m-%d")
-    )
-
-    try:
-        if poster_path and os.path.exists(poster_path):
-            with open(poster_path, "rb") as ph:
-                await bot.send_photo(chat_id=channel_id, photo=ph, caption=img_caption, parse_mode="HTML")
-            safe_delete(poster_path)
-        else:
-            fallback_image = "https://files.catbox.moe/goe4nn.jpg"
-            await bot.send_photo(chat_id=channel_id, photo=fallback_image, caption=img_caption, parse_mode="HTML")
-    except:
-        try:
-            await bot.send_message(chat_id=channel_id, text=img_caption, parse_mode="HTML", disable_web_page_preview=True)
-        except: pass
-
-    await asyncio.sleep(1.2)
-    await bot.send_message(
-        chat_id=channel_id,
-        text=full_caption_with_links,
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=build_post_keyboard()
-    )
-
-# ================== التنظيف من GitHub ==================
 def cleanup_old_github_files():
     api_url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
@@ -304,96 +152,43 @@ def cleanup_old_github_files():
                     except: continue
     except: pass
 
-# ================== التفريغ اليدوي الشامل من GitHub ==================
-async def force_cleanup_github(bot, chat_id, message_id):
-    edit_state = {"time": 0}
-    await safe_edit(bot, chat_id, message_id, "🧹 **جاري مسح الملفات من مساحة GitHub لتفريغها...** ⏳", edit_state, force=True)
-    api_url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    deleted_count = 0
-    try:
-        resp = requests.get(api_url, headers=headers)
-        if resp.status_code == 200:
-            for file in resp.json():
-                name = file.get("name", "")
-                # يمسح أي ملفات M3U أو مضغوطة تم رفعها مسبقاً
-                if name.startswith("FIW_") or name.startswith("Hunter_") or name.endswith(".m3u") or name.endswith(".zip"):
-                    try:
-                        requests.delete(file.get("url"), json={"message": f"Manual Delete: {name}", "sha": file.get("sha")}, headers=headers)
-                        deleted_count += 1
-                    except: pass
-            await safe_edit(bot, chat_id, message_id, f"✅ **تم تفريغ مساحة GitHub بنجاح!**\n🗑️ تم حذف {deleted_count} ملفات قديمة.", edit_state, force=True)
-        else:
-            await safe_edit(bot, chat_id, message_id, f"❌ **فشل الاتصال بـ GitHub.** الكود: {resp.status_code}", edit_state, force=True)
-    except Exception as e:
-        await safe_edit(bot, chat_id, message_id, f"❌ **خطأ أثناء التفريغ:** {e}", edit_state, force=True)
+async def upload_to_cloud(filename, selected_api="github"):
+    if selected_api != "github" or not os.path.exists(filename) or os.path.getsize(filename) == 0:
+        return None
 
-async def upload_to_cloud(filename, selected_api="all"):
-    if not os.path.exists(filename) or os.path.getsize(filename) == 0: return None
     size_mb = os.path.getsize(filename) / (1024 * 1024)
+    if size_mb > 95:
+        print(f"GitHub upload skipped: {filename} is {size_mb:.1f} MB.")
+        return None
+
     base_name = os.path.basename(filename)
-    custom_timeout = aiohttp.ClientTimeout(total=90)
-    
-    # 🔴 التعديل هنا: GitHub هو الأول الآن
-    apis_to_try = ["github", "catbox_m3u8", "pixeldrain", "uguu", "litterbox"] if selected_api == "all" else [selected_api]
-    
-    for api in apis_to_try:
-        if api == "github" and size_mb > 95: continue
-        for attempt in range(1, 3):
-            try:
-                link = None
-                if api == "github":
-                    cleanup_old_github_files()
-                    safe_name = f"FIW_{int(time.time())}_{attempt}_{uuid.uuid4().hex[:6]}_{base_name}"
-                    api_url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/{safe_name}"
-                    with open(filename, "rb") as f: encoded_content = base64.b64encode(f.read()).decode('utf-8')
-                    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-                    payload = {"message": f"Auto Upload {safe_name}", "content": encoded_content}
-                    async with aiohttp.ClientSession(timeout=custom_timeout) as session:
-                        async with session.put(api_url, json=payload, headers=headers) as response:
-                            if response.status in [201, 200]: link = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/main/{safe_name}"
-                elif api == "catbox_m3u8":
-                    def up_cat():
-                        with open(filename, 'rb') as f:
-                            resp = requests.post("https://catbox.moe/user/api.php", data={'reqtype': 'fileupload', 'userhash': '4743fd4cd7b648c176c6e5800'}, files={'fileToUpload': (base_name, f, 'application/vnd.apple.mpegurl')})
-                            if resp.status_code == 200 and resp.text.startswith("http"): return resp.text.strip()
-                        return None
-                    link = await asyncio.to_thread(up_cat)
-                elif api == "pixeldrain":
-                    auth = aiohttp.BasicAuth(login="", password="6bd803d9-4e6e-402f-a7b1-c355ac2dae63")
-                    async with aiohttp.ClientSession(auth=auth, timeout=custom_timeout) as session:
-                        with open(filename, 'rb') as f:
-                            data = aiohttp.FormData()
-                            data.add_field('file', f, filename=base_name)
-                            async with session.post("https://pixeldrain.com/api/file", data=data) as response:
-                                if response.status in [200, 201]:
-                                    res = await response.json()
-                                    if res.get("success"): link = f"https://pixeldrain.com/api/file/{res.get('id')}"
-                elif api == "uguu":
-                    async with aiohttp.ClientSession(timeout=custom_timeout) as session:
-                        with open(filename, 'rb') as f:
-                            data = aiohttp.FormData()
-                            data.add_field('files[]', f, filename=base_name)
-                            async with session.post("https://uguu.se/upload.php", data=data) as response:
-                                if response.status == 200:
-                                    res = await response.json()
-                                    if res.get("success"): link = res["files"][0]["url"]
-                elif api == "litterbox":
-                    async with aiohttp.ClientSession(timeout=custom_timeout) as session:
-                        with open(filename, 'rb') as f:
-                            data = aiohttp.FormData()
-                            data.add_field('reqtype', 'fileupload')
-                            data.add_field('time', '72h')
-                            data.add_field('fileToUpload', f, filename=base_name)
-                            async with session.post("https://litterbox.catbox.moe/resources/internals/api.php", data=data) as response:
-                                if response.status == 200:
-                                    res = await response.text()
-                                    if res.startswith("http"): link = res.strip()
-                if link: return link
-            except Exception: await asyncio.sleep(attempt * 2)
+    safe_name = f"FIW_{int(time.time())}_{uuid.uuid4().hex[:6]}_{base_name}"
+    api_url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/{safe_name}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    for attempt in range(1, 3):
+        try:
+            cleanup_old_github_files()
+            with open(filename, "rb") as f:
+                encoded_content = base64.b64encode(f.read()).decode("utf-8")
+            payload = {
+                "message": f"Auto Upload {safe_name}",
+                "content": encoded_content
+            }
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as session:
+                async with session.put(api_url, json=payload, headers=headers) as response:
+                    if response.status in [200, 201]:
+                        return f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/main/{safe_name}"
+                    print(f"GitHub upload failed: HTTP {response.status}")
+        except Exception as e:
+            print(f"GitHub upload attempt {attempt} failed: {e}")
+        await asyncio.sleep(attempt * 2)
     return None
 
-async def upload_to_cloud_sem(filename, selected_api="all"):
+async def upload_to_cloud_sem(filename, selected_api="github"):
     global UPLOAD_SEM
     if UPLOAD_SEM is None:
         return await upload_to_cloud(filename, selected_api)
@@ -516,13 +311,6 @@ async def fetch_and_analyze(session, url, idx):
         return await asyncio.wait_for(_fetch(), timeout=FETCH_TIMEOUT)
     except: return {"id": idx, "success": False}
 
-async def safe_edit(bot, chat_id, message_id, text, edit_state, markup=None, force=False):
-    if force or (time.time() - edit_state["time"] > 3.0):
-        try:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, parse_mode="Markdown", reply_markup=markup)
-            edit_state["time"] = time.time()
-        except: pass
-
 async def extract_urls_from_chat(app, chat_id_pyro, limit=HISTORY_LIMIT):
     urls = set()
     try:
@@ -540,143 +328,24 @@ async def extract_urls_from_chat(app, chat_id_pyro, limit=HISTORY_LIMIT):
     return urls
 
 # ================== 1. دالة الصيد التلقائي والموازي (TURBO) ==================
-async def run_hunter_action(bot, chat_id, message_id, args):
-    global DIALOG_SEM, FETCH_SEM
+if __name__ == "__main__":
+    asyncio.run(main())
+
+# ================== GitHub-only execution ==================
+
+async def github_hunt(keyword="", target_count=5):
+    app = Client(
+        "github_iptv_scraper",
+        api_id=24974564,
+        api_hash="b87511de89b42178862e13e84147952b",
+        session_string=SESSION_STRING
+    )
+    await app.start()
+    found_count = 0
+    tested_urls = set()
+    connector = aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=300, use_dns_cache=True)
+
     try:
-        edit_state = {"time": 0}
-        target_count = int(args[-1]) if args[-1].isdigit() else int(args[0])
-        keyword = " ".join(args[:-1]).lower() if len(args) > 1 and args[-1].isdigit() else (" ".join(args[1:]).lower() if len(args) > 1 else "")
-
-        await safe_edit(bot, chat_id, message_id, "🚀 **بدأ الصيد المباشر بالتوربو الفائق (البحث الصارم)...**", edit_state, stop_button(), force=True)
-
-        app = Client("wassim_fast_scraper", api_id=24974564, api_hash="b87511de89b42178862e13e84147952b", session_string=SESSION_STRING)
-        await app.start()
-
-        found_count, scanned, collected_links, tested_urls = 0, 0, [], set()
-        total_live, total_vod, total_series = 0, 0, 0
-        found_lock = asyncio.Lock()
-
-        connector = aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=300, use_dns_cache=True)
-        async with aiohttp.ClientSession(connector=connector) as session_req:
-
-            target_chats = []
-            async for dialog in app.get_dialogs():
-                chat = dialog.chat
-                if chat.type not in [enums.ChatType.CHANNEL, enums.ChatType.SUPERGROUP, enums.ChatType.GROUP]:
-                    continue
-                chat_name = chat.title or str(chat.id)
-                if any(kw in chat_name.lower() for kw in TARGET_KEYWORDS):
-                    target_chats.append((chat.id, chat_name))
-
-            await safe_edit(bot, chat_id, message_id, f"🎯 **تم اكتشاف {len(target_chats)} قناة هدف. بدء المعالجة...**", edit_state, stop_button(), force=True)
-
-            async def process_one_chat(chat_id_pyro, chat_name):
-                nonlocal found_count, scanned, collected_links, tested_urls, total_live, total_vod, total_series
-                async with DIALOG_SEM:
-                    if found_count >= target_count:
-                        return
-                    scanned += 1
-                    await safe_edit(bot, chat_id, message_id, f"🔍 **فحص:** {chat_name}\n✅ المجهز: {found_count}/{target_count}", edit_state, stop_button())
-
-                    urls_to_test = await extract_urls_from_chat(app, chat_id_pyro, limit=HISTORY_LIMIT)
-
-                    async with found_lock:
-                        valid_urls = [u for u in urls_to_test if u not in tested_urls]
-                        tested_urls.update(valid_urls)
-
-                    if not valid_urls:
-                        return
-
-                    tasks = [fetch_and_analyze(session_req, u, i) for i, u in enumerate(valid_urls)]
-                    results = await asyncio.gather(*tasks)
-
-                    async def handle_result(res):
-                        nonlocal found_count, collected_links, total_live, total_vod, total_series
-                        if found_count >= target_count:
-                            return
-                        if not (res and res.get("success")):
-                            return
-                        groups = res["groups"]
-                        
-                        # --- تطبيق فلتر البحث الذكي الصارم ---
-                        if keyword:
-                            filtered = defaultdict(list)
-                            for g_name, entries in groups.items():
-                                for extinf, curl, _ in entries:
-                                    if is_smart_match(keyword, g_name, extinf):
-                                        filtered[g_name].append((extinf, curl, False))
-                            groups = filtered
-                            
-                        if not groups:
-                            return
-
-                        fname = f"Hunter_{uuid.uuid4().hex[:4].upper()}.m3u"
-                        write_m3u_and_get_count(groups, fname)
-                        link = await upload_to_cloud_sem(compress_if_large(fname), "all")
-                        safe_delete(fname)
-                        if link:
-                            async with found_lock:
-                                if found_count < target_count:
-                                    found_count += 1
-                                    total_live += res.get("live", 0)
-                                    total_vod += res.get("vod", 0)
-                                    total_series += res.get("series", 0)
-                                    collected_links.append(f"🔹 <b>الباقة {found_count}:</b> <code>{link}</code>")
-                                    await safe_edit(bot, chat_id, message_id, f"🎉 **صيد قوي!**\n✅ المجهز: {found_count}/{target_count}", edit_state, stop_button(), force=True)
-
-                    await asyncio.gather(*[handle_result(r) for r in results])
-
-            await asyncio.gather(*[process_one_chat(cid, cname) for cid, cname in target_chats])
-
-        await app.stop()
-
-        if collected_links:
-            if keyword:
-                cap_title = f"🔥 𝗘𝗫𝗖𝗟𝗨𝗦𝗜𝗩𝗘 𝗦𝗘𝗥𝗩𝗘𝗥: {keyword.upper()} 🔥"
-                ai_title = f"EXCLUSIVE {keyword.upper()} SERVER"
-            else:
-                cap_title = "🔗 𝗗𝗜𝗥𝗘𝗖𝗧 𝗜𝗣𝗧𝗩 𝗟𝗜𝗡𝗞𝗦 🔗"
-                ai_title = "DIRECT LINKS"
-
-            caption = WARNING_TEXT + LINK_POST_CAPTION.replace("🔗 𝗗𝗜𝗥𝗘𝗖𝗧 𝗜𝗣𝗧𝗩 𝗟𝗜𝗡𝗞𝗦 🔗", cap_title).replace("{links}", "\n\n".join(collected_links))
-
-            await send_post_with_ai_image(
-                bot=bot,
-                channel_id=CHANNEL_ID,
-                title_text=ai_title,
-                server_count=found_count,
-                keyword=keyword,
-                full_caption_with_links=caption,
-                live=total_live,
-                vod=total_vod,
-                series=total_series
-            )
-
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"🏁 **اكتملت العملية بنجاح!** تم النشر بنجاح.")
-        else:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="❌ لم أجد نتائج مطابقة للبحث الصارم.")
-    except Exception as e:
-        try:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"❌ خطأ: {e}")
-        except: pass
-
-# ================== 2. دالة الصيد كملف نصي (hunttxt) — TURBO ==================
-async def run_hunttxt_action(bot, chat_id, message_id, args):
-    global DIALOG_SEM
-    try:
-        edit_state = {"time": 0}
-        target_count = int(args[-1]) if args[-1].isdigit() else int(args[0])
-        keyword = " ".join(args[:-1]).lower() if len(args) > 1 and args[-1].isdigit() else (" ".join(args[1:]).lower() if len(args) > 1 else "")
-
-        await safe_edit(bot, chat_id, message_id, "🚀 **بدأ الصيد النصي بالتوربو الموازي (البحث الصارم)...**", edit_state, stop_button(), force=True)
-
-        app = Client("wassim_fast_scraper", api_id=24974564, api_hash="b87511de89b42178862e13e84147952b", session_string=SESSION_STRING)
-        await app.start()
-
-        found_count, scanned, collected_links_raw, tested_urls = 0, 0, [], set()
-        found_lock = asyncio.Lock()
-
-        connector = aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=300, use_dns_cache=True)
         async with aiohttp.ClientSession(connector=connector) as session_req:
             target_chats = []
             async for dialog in app.get_dialogs():
@@ -687,37 +356,28 @@ async def run_hunttxt_action(bot, chat_id, message_id, args):
                 if any(kw in chat_name.lower() for kw in TARGET_KEYWORDS):
                     target_chats.append((chat.id, chat_name))
 
-            await safe_edit(bot, chat_id, message_id, f"🎯 **تم اكتشاف {len(target_chats)} قناة. بدء الفحص...**", edit_state, stop_button(), force=True)
+            async def process_chat(chat_id, chat_name):
+                nonlocal found_count
+                if found_count >= target_count:
+                    return
 
-            async def process_one_chat(chat_id_pyro, chat_name):
-                nonlocal found_count, scanned, collected_links_raw, tested_urls
                 async with DIALOG_SEM:
-                    if found_count >= target_count:
-                        return
-                    scanned += 1
-                    await safe_edit(bot, chat_id, message_id, f"🔍 **فحص:** {chat_name}\n✅ المستخرج: {found_count}/{target_count}", edit_state, stop_button())
-
-                    urls_to_test = await extract_urls_from_chat(app, chat_id_pyro, limit=HISTORY_LIMIT)
-
-                    async with found_lock:
-                        valid_urls = [u for u in urls_to_test if u not in tested_urls]
-                        tested_urls.update(valid_urls)
-
-                    if not valid_urls:
+                    urls = await extract_urls_from_chat(app, chat_id, HISTORY_LIMIT)
+                    urls = [u for u in urls if u not in tested_urls]
+                    tested_urls.update(urls)
+                    if not urls:
                         return
 
-                    tasks = [fetch_and_analyze(session_req, u, i) for i, u in enumerate(valid_urls)]
-                    results = await asyncio.gather(*tasks)
+                    results = await asyncio.gather(*[
+                        fetch_and_analyze(session_req, u, i)
+                        for i, u in enumerate(urls)
+                    ])
 
-                    async def handle_result(res):
-                        nonlocal found_count, collected_links_raw
-                        if found_count >= target_count:
-                            return
-                        if not (res and res.get("success")):
-                            return
+                    for res in results:
+                        if found_count >= target_count or not res.get("success"):
+                            continue
+
                         groups = res["groups"]
-                        
-                        # --- تطبيق فلتر البحث الذكي الصارم ---
                         if keyword:
                             filtered = defaultdict(list)
                             for g_name, entries in groups.items():
@@ -725,141 +385,172 @@ async def run_hunttxt_action(bot, chat_id, message_id, args):
                                     if is_smart_match(keyword, g_name, extinf):
                                         filtered[g_name].append((extinf, curl, False))
                             groups = filtered
-                            
+
                         if not groups:
-                            return
+                            continue
 
                         fname = f"Hunter_{uuid.uuid4().hex[:4].upper()}.m3u"
                         write_m3u_and_get_count(groups, fname)
-                        link = await upload_to_cloud_sem(compress_if_large(fname), "all")
+                        final_file = compress_if_large(fname)
+                        link = await upload_to_cloud_sem(final_file, "github")
                         safe_delete(fname)
+                        if final_file != fname:
+                            safe_delete(final_file)
+
                         if link:
-                            async with found_lock:
-                                if found_count < target_count:
-                                    found_count += 1
-                                    collected_links_raw.append(link)
-                                    await safe_edit(bot, chat_id, message_id, f"🎉 **تم التجهيز!**\n✅ المستخرج: {found_count}/{target_count}", edit_state, stop_button(), force=True)
+                            found_count += 1
+                            print(f"GitHub published: {link}")
 
-                    await asyncio.gather(*[handle_result(r) for r in results])
-
-            await asyncio.gather(*[process_one_chat(cid, cname) for cid, cname in target_chats])
-
+            await asyncio.gather(*[
+                process_chat(cid, name) for cid, name in target_chats
+            ])
+    finally:
         await app.stop()
 
-        if collected_links_raw:
-            txt_filename = f"Cloud_Links_{target_count}_{uuid.uuid4().hex[:4]}.txt"
-            with open(txt_filename, "w", encoding="utf-8") as f: f.write("\n".join(collected_links_raw))
-            with open(txt_filename, "rb") as f_send:
-                await bot.send_document(chat_id=chat_id, document=f_send, caption=f"✅ **اكتمل صيد الملف النصي!**\nإليك {len(collected_links_raw)} روابط سحابية.")
-            safe_delete(txt_filename)
-            await bot.delete_message(chat_id=chat_id, message_id=message_id)
-        else:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="❌ لم أجد نتائج مطابقة للبحث الصارم.")
-    except Exception as e:
-        try:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"❌ خطأ: {e}")
-        except: pass
+    print(f"Done: {found_count}/{target_count} published to GitHub.")
+    return found_count
 
-# ================== 3. دالة السحب السريع (scrape) — TURBO ==================
-async def run_scrape_action(bot, chat_id, message_id, args):
-    global DIALOG_SEM
+
+async def github_hunttxt(keyword="", target_count=5):
+    app = Client(
+        "github_iptv_scraper",
+        api_id=24974564,
+        api_hash="b87511de89b42178862e13e84147952b",
+        session_string=SESSION_STRING
+    )
+    await app.start()
+    found = []
+    tested_urls = set()
+    connector = aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=300, use_dns_cache=True)
+
     try:
-        edit_state = {"time": 0}
-        target_count = int(args[0])
-        await safe_edit(bot, chat_id, message_id, "⚡ **بدأ السحب الفائق الخام للمصنع...**", edit_state, stop_button(), force=True)
+        async with aiohttp.ClientSession(connector=connector) as session_req:
+            target_chats = []
+            async for dialog in app.get_dialogs():
+                chat = dialog.chat
+                if chat.type not in [enums.ChatType.CHANNEL, enums.ChatType.SUPERGROUP, enums.ChatType.GROUP]:
+                    continue
+                chat_name = chat.title or str(chat.id)
+                if any(kw in chat_name.lower() for kw in TARGET_KEYWORDS):
+                    target_chats.append((chat.id, chat_name))
 
-        app = Client("wassim_fast_scraper", api_id=24974564, api_hash="b87511de89b42178862e13e84147952b", session_string=SESSION_STRING)
-        await app.start()
+            async def process_chat(chat_id, chat_name):
+                nonlocal found
+                if len(found) >= target_count:
+                    return
 
-        all_links = []
-        links_lock = asyncio.Lock()
+                async with DIALOG_SEM:
+                    urls = await extract_urls_from_chat(app, chat_id, HISTORY_LIMIT)
+                    urls = [u for u in urls if u not in tested_urls]
+                    tested_urls.update(urls)
+                    if not urls:
+                        return
 
-        target_chats = []
+                    results = await asyncio.gather(*[
+                        fetch_and_analyze(session_req, u, i)
+                        for i, u in enumerate(urls)
+                    ])
+
+                    for res in results:
+                        if len(found) >= target_count or not res.get("success"):
+                            continue
+
+                        groups = res["groups"]
+                        if keyword:
+                            filtered = defaultdict(list)
+                            for g_name, entries in groups.items():
+                                for extinf, curl, _ in entries:
+                                    if is_smart_match(keyword, g_name, extinf):
+                                        filtered[g_name].append((extinf, curl, False))
+                            groups = filtered
+
+                        if not groups:
+                            continue
+
+                        fname = f"Hunter_{uuid.uuid4().hex[:4].upper()}.m3u"
+                        write_m3u_and_get_count(groups, fname)
+                        final_file = compress_if_large(fname)
+                        link = await upload_to_cloud_sem(final_file, "github")
+                        safe_delete(fname)
+                        if final_file != fname:
+                            safe_delete(final_file)
+
+                        if link:
+                            found.append(link)
+                            print(f"GitHub published: {link}")
+
+            await asyncio.gather(*[
+                process_chat(cid, name) for cid, name in target_chats
+            ])
+    finally:
+        await app.stop()
+
+    txt_filename = f"Cloud_Links_{len(found)}_{uuid.uuid4().hex[:4]}.txt"
+    with open(txt_filename, "w", encoding="utf-8") as f:
+        f.write("\n".join(found))
+    link = await upload_to_cloud_sem(txt_filename, "github")
+    safe_delete(txt_filename)
+    print(f"GitHub link index published: {link}")
+    return link
+
+
+async def github_scrape(target_count=100):
+    app = Client(
+        "github_iptv_scraper",
+        api_id=24974564,
+        api_hash="b87511de89b42178862e13e84147952b",
+        session_string=SESSION_STRING
+    )
+    await app.start()
+    all_links = set()
+
+    try:
+        async def scrape_chat(chat_id):
+            async with DIALOG_SEM:
+                all_links.update(await extract_urls_from_chat(app, chat_id, HISTORY_LIMIT))
+
+        chat_ids = []
         async for dialog in app.get_dialogs():
             chat = dialog.chat
-            if chat.type not in [enums.ChatType.CHANNEL, enums.ChatType.SUPERGROUP, enums.ChatType.GROUP]:
-                continue
-            target_chats.append(chat.id)
+            if chat.type in [enums.ChatType.CHANNEL, enums.ChatType.SUPERGROUP, enums.ChatType.GROUP]:
+                chat_ids.append(chat.id)
 
-        async def scrape_one(chat_id_pyro):
-            async with DIALOG_SEM:
-                if len(all_links) >= target_count * 2:
-                    return
-                urls = await extract_urls_from_chat(app, chat_id_pyro, limit=HISTORY_LIMIT)
-                async with links_lock:
-                    all_links.extend(urls)
-
-        await asyncio.gather(*[scrape_one(cid) for cid in target_chats])
-
+        await asyncio.gather(*[scrape_chat(cid) for cid in chat_ids])
+    finally:
         await app.stop()
-        final_links = list(set(all_links))[:target_count]
-        if final_links:
-            txt_filename = f"Scraped_{len(final_links)}.txt"
-            with open(txt_filename, "w", encoding="utf-8") as f: f.write("\n".join(final_links))
-            with open(txt_filename, "rb") as f_send:
-                await bot.send_document(chat_id=chat_id, document=f_send, caption=f"⚡ **اكتمل السحب السريع بنجاح!**\nتم جلب {len(final_links)} روابط.")
-            safe_delete(txt_filename)
-            await bot.delete_message(chat_id=chat_id, message_id=message_id)
-        else:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="❌ لم يتم العثور على روابط جديدة.")
-    except Exception as e:
-        try:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"❌ خطأ: {e}")
-        except: pass
 
-# ================== المحرك السحابي الأساسي المتحكم ==================
+    final_links = list(all_links)[:target_count]
+    filename = f"Scraped_{len(final_links)}.txt"
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write("\n".join(final_links))
+    link = await upload_to_cloud_sem(filename, "github")
+    safe_delete(filename)
+    print(f"GitHub scrape result published: {link}")
+    return link
+
+
 async def main():
     global DIALOG_SEM, FETCH_SEM, UPLOAD_SEM
-    if not SESSION_STRING: exit(1)
-
     DIALOG_SEM = asyncio.Semaphore(MAX_PARALLEL_DIALOGS)
     FETCH_SEM = asyncio.Semaphore(MAX_PARALLEL_FETCHES)
     UPLOAD_SEM = asyncio.Semaphore(MAX_PARALLEL_UPLOADS)
 
-    bot = Bot(token=TOKEN)
-    payload = json.loads(os.environ.get("PAYLOAD", "{}"))
-    action = payload.get("action")
-    chat_id = payload.get("chat_id")
-    message_id = payload.get("message_id")
-    if not chat_id or not action: return
-
+    action = os.environ.get("ACTION", "hunt").strip().lower()
+    keyword = os.environ.get("KEYWORD", "").strip()
     try:
-        if action == "hunt":
-            await run_hunter_action(bot, chat_id, message_id, payload.get("args", []))
-        elif action == "hunttxt":
-            await run_hunttxt_action(bot, chat_id, message_id, payload.get("args", []))
-        elif action == "scrape":
-            await run_scrape_action(bot, chat_id, message_id, payload.get("args", []))
-        elif action == "clean_github":
-            await force_cleanup_github(bot, chat_id, message_id)
-        elif action == "process_file":
-            await safe_edit(bot, chat_id, message_id, "⚙️ **المصنع يقوم بتنظيف وتفريغ الملف بالفورمات الأصلي الشرعي...** ⏳", {"time": 0}, stop_button(), force=True)
-            tg_file = await bot.get_file(payload.get("file_id"))
-            filepath = "temp_dl.m3u"
-            await tg_file.download_to_drive(filepath)
+        count = max(1, int(os.environ.get("COUNT", "5")))
+    except ValueError:
+        count = 5
 
-            groups, total, adult, live, vod, series = await analyze_async(filepath)
-            os.remove(filepath)
+    if action == "hunt":
+        await github_hunt(keyword, count)
+    elif action == "hunttxt":
+        await github_hunttxt(keyword, count)
+    elif action == "scrape":
+        await github_scrape(count)
+    else:
+        raise SystemExit(f"Unsupported ACTION: {action}")
 
-            out_file = "clean_original.m3u"
-            write_m3u_and_get_count(groups, out_file)
-            final_file = compress_if_large(out_file)
-
-            git_link, catbox_link = await asyncio.gather(
-                upload_to_cloud_sem(final_file, "github"),
-                upload_to_cloud_sem(final_file, "catbox_m3u8"),
-            )
-
-            safe_delete(out_file)
-            if final_file != out_file: safe_delete(final_file)
-
-            msg = f"✅ **اكتمل التنظيف بالفورمات الأصلي!**\n\n📡 إجمالي القنوات: {total:,}\n📺 Live: {live:,} | 🎬 VOD: {vod:,} | 🍿 Series: {series:,}\n🔞 محذوف (إباحي): {adult:,}\n\n🔗 **GitHub:**\n`{git_link}`\n\n🔗 **Catbox:**\n`{catbox_link}`"
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=msg, parse_mode="Markdown")
-
-    except Exception as e:
-        try:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"❌ خطأ داخلي في عمل المصنع: {str(e)}")
-        except: pass
 
 if __name__ == "__main__":
     asyncio.run(main())
