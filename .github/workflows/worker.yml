@@ -1,18 +1,37 @@
-
-name: IPTV Heavy Worker
+name: IPTV GitHub Publisher
 
 on:
   workflow_dispatch:
-  repository_dispatch:
-    types: [run_bot_task]
+    inputs:
+      action:
+        description: "Action: hunt, hunttxt, or scrape"
+        required: true
+        default: "hunt"
+        type: choice
+        options:
+          - hunt
+          - hunttxt
+          - scrape
+      keyword:
+        description: "Optional channel keyword"
+        required: false
+        default: ""
+        type: string
+      count:
+        description: "Number of results"
+        required: true
+        default: "5"
+        type: string
 
 concurrency:
-  group: iptv-bot
+  group: iptv-github-publisher
   cancel-in-progress: false
 
 jobs:
   process:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -20,20 +39,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install Packages
-        run: python -m pip install --upgrade pip && python -m pip install python-telegram-bot requests aiohttp pyrogram tgcrypto nest_asyncio Pillow
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests aiohttp pyrogram tgcrypto
 
-      - name: Download Professional Font
-        run: wget -q -O font.ttf https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Black.ttf
-
-      - name: Run Heavy Script
+      - name: Run GitHub Publisher
         env:
-          MY_TELEGRAM_TOKEN: ${{ secrets.MY_TELEGRAM_TOKEN }}
           MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
           MY_SESSION_STRING: ${{ secrets.MY_SESSION_STRING }}
-          CF_API_KEY: ${{ secrets.CF_API_KEY }}
-          PAYLOAD: '${{ toJSON(github.event.client_payload) }}'
           GITHUB_REPOSITORY: ${{ github.repository }}
+          ACTION: ${{ inputs.action }}
+          KEYWORD: ${{ inputs.keyword }}
+          COUNT: ${{ inputs.count }}
         run: python worker.py
