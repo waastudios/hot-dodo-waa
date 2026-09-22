@@ -23,18 +23,34 @@ print("🔍 DEBUG: جاري فحص متغيرات البيئة...")
 s_str = os.environ.get("MY_SESSION_STRING", "").strip()
 
 if not s_str:
-    print("❌ CRITICAL ERROR: كود الجلسة فارغ! تأكد من إعدادات Repository Secrets.")
+    print("❌ CRITICAL ERROR: MY_SESSION_STRING is missing. Add it under Settings → Secrets and variables → Actions.")
+    exit(1)
+
+if not os.environ.get("MY_TELEGRAM_TOKEN", "").strip():
+    print("❌ CRITICAL ERROR: MY_TELEGRAM_TOKEN is missing.")
+    exit(1)
+
+if not os.environ.get("MY_GITHUB_TOKEN", "").strip():
+    print("❌ CRITICAL ERROR: MY_GITHUB_TOKEN is missing.")
+    exit(1)
+
+if not os.environ.get("CF_API_KEY", "").strip():
+    print("❌ CRITICAL ERROR: CF_API_KEY is missing.")
     exit(1)
 
 # ================== بياناتك السرية ==================
 TOKEN = os.environ.get("MY_TELEGRAM_TOKEN")
 GITHUB_TOKEN = os.environ.get("MY_GITHUB_TOKEN")
-GITHUB_USER = "mesbahikarim10-source"
-REPO_NAME = "hot-dodo"
+GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "").strip()
+if "/" in GITHUB_REPOSITORY:
+    GITHUB_USER, REPO_NAME = GITHUB_REPOSITORY.split("/", 1)
+else:
+    GITHUB_USER = os.environ.get("GITHUB_USER", "").strip()
+    REPO_NAME = os.environ.get("GITHUB_REPO", "").strip()
 SESSION_STRING = s_str
 
 # خدعة النينجا: وضع التوكن مقسوم لتفادي حظر جيت هاب
-CF_API_KEY = "cfat_" + "U6wttBRosBcEGKux9jYYROYb7FQi2XtfJY6ZNezi12ae0594"
+CF_API_KEY = os.environ.get("CF_API_KEY", "").strip()
 
 MAX_FILE_SIZE_MB = 150
 MIN_CHANNELS_REQUIRED = 300 
