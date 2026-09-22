@@ -135,7 +135,6 @@ async def is_link_working(url):
                 return response.status == 200
     except: return False
 
-CF_API_URL = "https://iptv-ai-bot.mesbahikarim03.workers.dev"
 
 def cleanup_old_github_files():
     api_url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/"
@@ -246,10 +245,8 @@ def get_clean_size_mb(groups):
 
 def write_m3u_and_get_count(groups, filename):
     count = 0
-    promo = '#EXTINF:-1 tvg-id="Free.IPTV" tvg-name="FREE IPTV WORLD PROMO" tvg-logo="https://files.catbox.moe/goe4nn.jpg" group-title="🌟 FREE IPTV WORLD 🌟",📺 Welcome to FREE IPTV WORLD\r\nhttps://files.catbox.moe/npglfu.mp4\r\n'
     with open(filename, "w", encoding="utf-8-sig") as f:
-        f.write("#EXTM3U\r\n" + promo)
-        count += 1
+        f.write("#EXTM3U\r\n")
         for g in groups.keys():
             for extinf, url, _ in groups[g]:
                 extinf_fixed = extinf.replace('\n', '\r\n')
